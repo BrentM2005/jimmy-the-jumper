@@ -1,30 +1,52 @@
 import pygame
 import sys
-import pygame.mixer  
+import pygame.mixer
 from src.config import *
 from src.player import Player
-from src.level_manager import LevelManager  
+from src.level_manager import LevelManager
 from src.camera import Camera
+
 
 class Game:
     def __init__(self):
         pygame.init()
-        pygame.mixer.init()  
+        self.audio_available = True
+        try:
+            pygame.mixer.init()
+        except pygame.error:
+            self.audio_available = False
+
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption(TITLE)
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 36)
         self.big_font = pygame.font.Font(None, 72)
-        
-        self.jump_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x00\x7f' * 1000))  # Beep
-        self.coin_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x7f\x00' * 1000))
-        self.death_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x00\x00' * 500 + b'\x7f' * 500))
-        
+
+        if self.audio_available:
+            self.jump_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x00\x7f' * 1000))
+            self.coin_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x7f\x00' * 1000))
+            self.death_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x00\x00' * 500 + b'\x7f' * 500))
+        else:
+            self.jump_sound = None
+            self.coin_sound = None
+            self.death_sound = None
+
         self.state = "MENU"
         self.level_manager = LevelManager()
         self.camera = None
         self.player = None
         self.high_score = 0
+        self.start_background_music()
+
+    def start_background_music(self):
+        if not self.audio_available:
+            return
+        try:
+            pygame.mixer.music.load("assets/sounds/background.ogg")
+            pygame.mixer.music.set_volume(0.4)
+            pygame.mixer.music.play(-1)
+        except (pygame.error, FileNotFoundError):
+            pass
 
     def init_game(self):
         self.level_manager.reset_to_first_level()
@@ -39,13 +61,13 @@ class Game:
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-            
+
             if event.type == pygame.KEYDOWN:
                 if self.state == "MENU":
                     if event.key == pygame.K_RETURN:
                         self.init_game()
                         self.state = "PLAYING"
-                    elif event.key == pygame.K_i:  
+                    elif event.key == pygame.K_i:
                         self.state = "INSTRUCTIONS"
                     elif event.key == pygame.K_ESCAPE:
                         pygame.quit()
@@ -57,7 +79,8 @@ class Game:
                 elif self.state == "PLAYING":
                     if event.key == pygame.K_SPACE or event.key == pygame.K_w:
                         self.player.jump()
-                        self.jump_sound.play()
+                        if self.jump_sound:
+                            self.jump_sound.play()
                     elif event.key == pygame.K_ESCAPE:
                         self.state = "PAUSED"
 
@@ -71,9 +94,9 @@ class Game:
                     elif event.key == pygame.K_ESCAPE:
                         self.state = "MENU"
 
-    def update(self):
+    def update(self, dt):
         if self.state == "PLAYING":
-            self.level_manager.level.update(self.player)
+            self.level_manager.level.update(self.player, dt)
             self.player.update(self.level_manager.level.platforms)
             if self.player.rect.left < 0:
                 self.player.rect.left = 0
@@ -83,7 +106,24 @@ class Game:
             coin_hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.coins, True)
             for _ in coin_hits:
                 self.player.score += 10
-                self.coin_sound.play()
+                if self.coin_sound:
+                    self.coin_sound.play()
+
+            if self.level_manager.level.time_remaining <= 0:
+                self.player.lives -= 1
+                if self.death_sound:
+                    self.death_sound.play()
+                if self.player.lives <= 0:
+                    self.state = "GAME_OVER"
+                    if self.player.score > self.high_score:
+                        self.high_score = self.player.score
+                else:
+                    self.player.respawn(
+                        self.level_manager.level.spawn_x,
+                        self.level_manager.level.spawn_y
+                    )
+                    self.level_manager.level.time_remaining = float(self.level_manager.level.time_limit)
+                return
 
             if pygame.sprite.spritecollide(self.player, self.level_manager.level.goals, False):
                 next_level = self.level_manager.next_level()
@@ -102,7 +142,8 @@ class Game:
                     self.player.score += 50
                 else:
                     self.player.lives -= 1
-                    self.death_sound.play()
+                    if self.death_sound:
+                        self.death_sound.play()
                     if self.player.lives <= 0:
                         self.state = "GAME_OVER"
                         if self.player.score > self.high_score:
@@ -112,11 +153,12 @@ class Game:
                             self.level_manager.level.spawn_x,
                             self.level_manager.level.spawn_y
                         )
-                    break  
+                    break
 
-            if self.player.rect.top > SCREEN_HEIGHT * 2:  
+            if self.player.rect.top > SCREEN_HEIGHT * 2:
                 self.player.lives -= 1
-                self.death_sound.play()
+                if self.death_sound:
+                    self.death_sound.play()
                 if self.player.lives <= 0:
                     self.state = "GAME_OVER"
                     if self.player.score > self.high_score:
@@ -140,11 +182,11 @@ class Game:
         self.screen.fill(SKY_BLUE)
 
         if self.state == "MENU":
-            self.draw_text("JIMMY THE JUMPER", self.big_font, BLUE, SCREEN_WIDTH//2, SCREEN_HEIGHT//4, center=True)
-            self.draw_text("ENTER: Start | I: Instructions | ESC: Quit", self.font, BLACK, SCREEN_WIDTH//2, SCREEN_HEIGHT//2, center=True)
+            self.draw_text("JIMMY THE JUMPER", self.big_font, BLUE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4, center=True)
+            self.draw_text("ENTER: Start | I: Instructions | ESC: Quit", self.font, BLACK, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, center=True)
 
         elif self.state == "INSTRUCTIONS":
-            self.draw_text("INSTRUCTIONS", self.big_font, BLUE, SCREEN_WIDTH//2, 100, center=True)
+            self.draw_text("INSTRUCTIONS", self.big_font, BLUE, SCREEN_WIDTH // 2, 100, center=True)
             inst = [
                 "A/D or Arrows: Move",
                 "W/Space: Jump",
@@ -164,37 +206,39 @@ class Game:
             overlay.set_alpha(128)
             overlay.fill(BLACK)
             self.screen.blit(overlay, (0, 0))
-            self.draw_text("PAUSED", self.big_font, WHITE, SCREEN_WIDTH//2, SCREEN_HEIGHT//2, center=True)
-            self.draw_text("ENTER: Resume | ESC: Menu", self.font, WHITE, SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 60, center=True)
+            self.draw_text("PAUSED", self.big_font, WHITE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, center=True)
+            self.draw_text("ENTER: Resume | ESC: Menu", self.font, WHITE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 60, center=True)
 
         elif self.state == "PLAYING":
             self.level_manager.level.draw(self.screen, self.camera)
             self.screen.blit(self.player.image, self.camera.apply(self.player))
-            
+
             self.draw_text(f"Lives: {self.player.lives}", self.font, BLACK, 10, 10)
             self.draw_text(f"Score: {self.player.score}", self.font, BLACK, 10, 40)
             self.draw_text(f"Level: {self.level_manager.get_current_level_id()}", self.font, BLACK, 10, 70)
             self.draw_text(f"High: {self.high_score}", self.font, BLACK, SCREEN_WIDTH - 150, 10)
+            self.draw_text(f"Time: {int(self.level_manager.level.time_remaining)}", self.font, BLACK, SCREEN_WIDTH - 150, 40)
 
         elif self.state == "GAME_OVER":
             self.screen.fill(BLACK)
-            self.draw_text("GAME OVER", self.big_font, RED, SCREEN_WIDTH//2, SCREEN_HEIGHT//3, center=True)
-            self.draw_text(f"Final: {self.player.score}", self.font, WHITE, SCREEN_WIDTH//2, SCREEN_HEIGHT//2, center=True)
-            self.draw_text(f"High: {self.high_score}", self.font, WHITE, SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30, center=True)
-            self.draw_text("ENTER: Restart | ESC: Menu", self.font, WHITE, SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 90, center=True)
+            self.draw_text("GAME OVER", self.big_font, RED, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3, center=True)
+            self.draw_text(f"Final: {self.player.score}", self.font, WHITE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, center=True)
+            self.draw_text(f"High: {self.high_score}", self.font, WHITE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30, center=True)
+            self.draw_text("ENTER: Restart | ESC: Menu", self.font, WHITE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 90, center=True)
 
         elif self.state == "WIN":
             self.screen.fill(WHITE)
-            self.draw_text("YOU WON ALL LEVELS!", self.big_font, GREEN, SCREEN_WIDTH//2, SCREEN_HEIGHT//3, center=True)
-            self.draw_text(f"Final: {self.player.score}", self.font, BLACK, SCREEN_WIDTH//2, SCREEN_HEIGHT//2, center=True)
-            self.draw_text(f"High: {self.high_score}", self.font, BLACK, SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30, center=True)
-            self.draw_text("ENTER: Play Again | ESC: Menu", self.font, BLACK, SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 90, center=True)
+            self.draw_text("YOU WON ALL LEVELS!", self.big_font, GREEN, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3, center=True)
+            self.draw_text(f"Final: {self.player.score}", self.font, BLACK, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, center=True)
+            self.draw_text(f"High: {self.high_score}", self.font, BLACK, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30, center=True)
+            self.draw_text("ENTER: Play Again | ESC: Menu", self.font, BLACK, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 90, center=True)
 
         pygame.display.flip()
 
     def run(self):
         while True:
             self.handle_events()
-            self.update()
+            dt = self.clock.get_time() / 1000.0
+            self.update(dt)
             self.draw()
             self.clock.tick(FPS)

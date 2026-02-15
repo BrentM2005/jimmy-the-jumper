@@ -1,5 +1,4 @@
 import pygame
-import json  
 from src.config import *
 from src.platform_obj import Platform
 from src.enemy import Enemy
@@ -14,7 +13,9 @@ class Level:
         self.spawn_x = 0
         self.spawn_y = 0
         self.world_width = WORLD_WIDTH
-        self.bg_offset = 0  
+        self.bg_offset = 0
+        self.time_limit = 90
+        self.time_remaining = float(self.time_limit)
 
     @classmethod
     def from_data(cls, data, level_index=0):  
@@ -35,11 +36,14 @@ class Level:
 
         level.goals.add(Goal(data['goal'][0], data['goal'][1]))
         level.bg_speed = data['bg_speed']
+        level.time_limit = data.get('time_limit', 90)
+        level.time_remaining = float(level.time_limit)
         return level
 
-    def update(self, player):
+    def update(self, player, dt):
         self.enemies.update()
-        self.bg_offset += self.bg_speed  
+        self.bg_offset += self.bg_speed
+        self.time_remaining = max(0, self.time_remaining - dt)
 
     def draw(self, screen, camera):
         for i in range(SCREEN_HEIGHT // 2):
