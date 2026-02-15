@@ -27,5 +27,9 @@ class LevelManager:
     def restart_level(self):
         return self.load_current_level()
 
+    def reset_to_first_level(self):
+        self.current_level = 0
+        return self.load_current_level()
+
     def get_current_level_id(self):
         return self.current_level + 1

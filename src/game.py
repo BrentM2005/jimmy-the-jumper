@@ -27,7 +27,7 @@ class Game:
         self.high_score = 0
 
     def init_game(self):
-        self.level_manager.restart_level()
+        self.level_manager.reset_to_first_level()
         self.camera = Camera(self.level_manager.level.world_width, SCREEN_HEIGHT)
         self.player = Player(
             self.level_manager.level.spawn_x,
