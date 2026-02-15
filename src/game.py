@@ -75,6 +75,9 @@ class Game:
         if self.state == "PLAYING":
             self.level_manager.level.update(self.player)
             self.player.update(self.level_manager.level.platforms)
+            if self.player.rect.left < 0:
+                self.player.rect.left = 0
+                self.player.vel_x = 0
             self.camera.update(self.player)
 
             coin_hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.coins, True)
@@ -89,6 +92,7 @@ class Game:
                     self.player.respawn(next_level.spawn_x, next_level.spawn_y)
                 else:
                     self.state = "WIN"
+                return
 
             hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.enemies, False)
             for enemy in hits:
