@@ -1,11 +1,14 @@
 import pygame
 import sys
+import json
+import os
 import pygame.mixer
 from src.config import *
 from src.player import Player
 from src.level_manager import LevelManager
 from src.camera import Camera
 
+SAVE_FILE = "save.json"
 
 class Game:
     def __init__(self):
@@ -31,6 +34,13 @@ class Game:
             self.coin_sound = None
             self.death_sound = None
 
+        pygame.joystick.init()
+        self.joystick = None
+        if pygame.joystick.get_count() > 0:
+            self.joystick = pygame.joystick.Joystick(0)
+            self.joystick.init()
+            print(f"Controller detected: {self.joystick.get_name()}")
+
         self.state = "MENU"
         self.level_manager = LevelManager()
         self.camera = None
@@ -42,7 +52,7 @@ class Game:
         if not self.audio_available:
             return
         try:
-            pygame.mixer.music.load("assets/sounds/background.ogg")
+            pygame.mixer.music.load("assets/sounds/background.mp3")
             pygame.mixer.music.set_volume(0.4)
             pygame.mixer.music.play(-1)
         except (pygame.error, FileNotFoundError):
@@ -53,14 +63,65 @@ class Game:
         self.camera = Camera(self.level_manager.level.world_width, SCREEN_HEIGHT)
         self.player = Player(
             self.level_manager.level.spawn_x,
-            self.level_manager.level.spawn_y
+            self.level_manager.level.spawn_y,
+            self.joystick
         )
+
+    def save_game(self):
+        """Save current game state to a JSON file."""
+        if self.player is None:
+            return
+        data = {
+            "level_index": self.level_manager.current_level,
+            "score": self.player.score,
+            "lives": self.player.lives,
+            "high_score": self.high_score
+        }
+        try:
+            with open(SAVE_FILE, "w") as f:
+                json.dump(data, f)
+            print("Game saved.")
+        except Exception as e:
+            print(f"Save failed: {e}")
+
+    def load_game(self):
+        if not os.path.exists(SAVE_FILE):
+            return False
+        try:
+            with open(SAVE_FILE, "r") as f:
+                data = json.load(f)
+            self.level_manager.current_level = data["level_index"]
+            self.level_manager.load_current_level()
+            self.camera = Camera(self.level_manager.level.world_width, SCREEN_HEIGHT)
+            self.player = Player(
+                self.level_manager.level.spawn_x,
+                self.level_manager.level.spawn_y,
+                self.joystick
+            )
+            self.player.score = data["score"]
+            self.player.lives = data["lives"]
+            self.high_score = data["high_score"]
+            self.state = "PLAYING"
+            return True
+        except Exception as e:
+            print(f"Load failed: {e}")
+            return False
 
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
+            if event.type == pygame.JOYAXISMOTION:
+                if self.player and event.axis == 0:  
+                    self.player.joy_axis_x = event.value
+
+            if event.type == pygame.JOYBUTTONDOWN:
+                if self.player and event.button == 0:  
+                    self.player.jump()
+                    if self.jump_sound:
+                        self.jump_sound.play()
 
             if event.type == pygame.KEYDOWN:
                 if self.state == "MENU":
@@ -69,6 +130,11 @@ class Game:
                         self.state = "PLAYING"
                     elif event.key == pygame.K_i:
                         self.state = "INSTRUCTIONS"
+                    elif event.key == pygame.K_l:
+                        if self.load_game():
+                            print("Loaded successfully.")
+                        else:
+                            print("No save file found.")
                     elif event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         sys.exit()
@@ -83,6 +149,8 @@ class Game:
                             self.jump_sound.play()
                     elif event.key == pygame.K_ESCAPE:
                         self.state = "PAUSED"
+                    elif event.key == pygame.K_F5:
+                        self.save_game()
 
                 elif self.state in ["PAUSED", "GAME_OVER", "WIN"]:
                     if event.key == pygame.K_RETURN:
@@ -103,44 +171,22 @@ class Game:
                 self.player.vel_x = 0
             self.camera.update(self.player)
 
+            pow_hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.powerups, True)
+            for p in pow_hits:
+                self.player.activate_powerup(p.type)
+                self.player.score += 50
+                if self.coin_sound:
+                    self.coin_sound.play()
+
             coin_hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.coins, True)
             for _ in coin_hits:
                 self.player.score += 10
                 if self.coin_sound:
                     self.coin_sound.play()
 
-            if self.level_manager.level.time_remaining <= 0:
-                self.player.lives -= 1
-                if self.death_sound:
-                    self.death_sound.play()
-                if self.player.lives <= 0:
-                    self.state = "GAME_OVER"
-                    if self.player.score > self.high_score:
-                        self.high_score = self.player.score
-                else:
-                    self.player.respawn(
-                        self.level_manager.level.spawn_x,
-                        self.level_manager.level.spawn_y
-                    )
-                    self.level_manager.level.time_remaining = float(self.level_manager.level.time_limit)
-                return
-
-            if pygame.sprite.spritecollide(self.player, self.level_manager.level.goals, False):
-                next_level = self.level_manager.next_level()
-                if next_level:
-                    self.camera = Camera(next_level.world_width, SCREEN_HEIGHT)
-                    self.player.respawn(next_level.spawn_x, next_level.spawn_y)
-                else:
-                    self.state = "WIN"
-                return
-
-            hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.enemies, False)
-            for enemy in hits:
-                if self.player.vel_y > 0 and self.player.rect.bottom < enemy.rect.centery + 10:
-                    enemy.kill()
-                    self.player.vel_y = -10
-                    self.player.score += 50
-                else:
+            spike_hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.spikes, False)
+            for _ in spike_hits:
+                if not self.player.invincible:
                     self.player.lives -= 1
                     if self.death_sound:
                         self.death_sound.play()
@@ -149,13 +195,40 @@ class Game:
                         if self.player.score > self.high_score:
                             self.high_score = self.player.score
                     else:
-                        self.player.respawn(
-                            self.level_manager.level.spawn_x,
-                            self.level_manager.level.spawn_y
-                        )
-                    break
+                        self.player.respawn(self.level_manager.level.spawn_x, self.level_manager.level.spawn_y)
+                break
 
-            if self.player.rect.top > SCREEN_HEIGHT * 2:
+            if pygame.sprite.spritecollide(self.player, self.level_manager.level.goals, False):
+                next_lev = self.level_manager.next_level()
+                if next_lev is None:
+                    self.state = "WIN"
+                else:
+                    self.camera = Camera(next_lev.world_width, SCREEN_HEIGHT)
+                    self.player.respawn(next_lev.spawn_x, next_lev.spawn_y)
+                return
+
+            enemy_hits = pygame.sprite.spritecollide(self.player, self.level_manager.level.enemies, False)
+            for enemy in enemy_hits:
+                if self.player.vel_y > 0 and self.player.rect.bottom < enemy.rect.centery:
+                    enemy.kill()
+                    self.player.score += 50
+                    self.player.vel_y = JUMP_POWER * 0.7
+                    if self.coin_sound:
+                        self.coin_sound.play()
+                else:
+                    if not self.player.invincible:
+                        self.player.lives -= 1
+                        if self.death_sound:
+                            self.death_sound.play()
+                        if self.player.lives <= 0:
+                            self.state = "GAME_OVER"
+                            if self.player.score > self.high_score:
+                                self.high_score = self.player.score
+                        else:
+                            self.player.respawn(self.level_manager.level.spawn_x, self.level_manager.level.spawn_y)
+                break
+
+            if self.level_manager.level.time_remaining <= 0 and not self.player.invincible:
                 self.player.lives -= 1
                 if self.death_sound:
                     self.death_sound.play()
@@ -164,10 +237,19 @@ class Game:
                     if self.player.score > self.high_score:
                         self.high_score = self.player.score
                 else:
-                    self.player.respawn(
-                        self.level_manager.level.spawn_x,
-                        self.level_manager.level.spawn_y
-                    )
+                    self.player.respawn(self.level_manager.level.spawn_x, self.level_manager.level.spawn_y)
+
+            if self.player.rect.top > SCREEN_HEIGHT * 2 and not self.player.invincible:
+                self.player.lives -= 1
+                if self.death_sound:
+                    self.death_sound.play()
+                if self.player.lives <= 0:
+                    self.state = "GAME_OVER"
+                    if self.player.score > self.high_score:
+                        self.high_score = self.player.score
+                else:
+                    self.player.respawn(self.level_manager.level.spawn_x, self.level_manager.level.spawn_y)
+                return
 
     def draw_text(self, text, font, color, x, y, center=False):
         surface = font.render(text, True, color)
@@ -183,7 +265,7 @@ class Game:
 
         if self.state == "MENU":
             self.draw_text("JIMMY THE JUMPER", self.big_font, BLUE, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4, center=True)
-            self.draw_text("ENTER: Start | I: Instructions | ESC: Quit", self.font, BLACK, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, center=True)
+            self.draw_text("ENTER: Start | I: Instructions | L: Load Game | ESC: Quit", self.font, BLACK, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, center=True)
 
         elif self.state == "INSTRUCTIONS":
             self.draw_text("INSTRUCTIONS", self.big_font, BLUE, SCREEN_WIDTH // 2, 100, center=True)
@@ -191,6 +273,7 @@ class Game:
                 "A/D or Arrows: Move",
                 "W/Space: Jump",
                 "ESC: Pause/Menu",
+                "F5: Save Game",
                 "Collect coins (+10 pts)",
                 "Jump on enemies (+50 pts)",
                 "Reach goal to win level",

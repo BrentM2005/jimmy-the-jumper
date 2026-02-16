@@ -8,7 +8,7 @@ TITLE = "Jimmy the Jumper"
 GRAVITY = 0.8
 JUMP_POWER = -16
 PLAYER_SPEED = 5
-FRICTION = -0.1  
+FRICTION = -0.12  
 
 WORLD_WIDTH = 4000  
 SCROLL_THRESH = 200 
@@ -18,9 +18,12 @@ ENEMY_PATROL_RANGE = 200
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED = (255, 0, 0)     
-GREEN = (0, 255, 0)   
-BLUE = (0, 0, 255)    
+RED = (255, 50, 50)     
+GREEN = (50, 205, 50)   
+BLUE = (65, 105, 225)    
 SKY_BLUE = (135, 206, 235)
-YELLOW = (255, 255, 0)
-PURPLE = (128, 0, 128)
+YELLOW = (255, 215, 0)
+PURPLE = (148, 0, 211)
+ORANGE = (255, 165, 0) 
+
+TILE_SIZE = 32
